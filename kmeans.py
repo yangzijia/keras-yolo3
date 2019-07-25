@@ -3,9 +3,12 @@ import numpy as np
 
 class YOLO_Kmeans:
 
-    def __init__(self, cluster_number, filename):
+    def __init__(self, cluster_number, filename='train.txt'):
         self.cluster_number = cluster_number
-        self.filename = "2012_train.txt"
+        self.filename = filename
+
+        self.anchors_list = []
+        self.accuracy_list = []
 
     def iou(self, boxes, clusters):  # 1 box -> k clusters
         n = boxes.shape[0]
@@ -75,6 +78,9 @@ class YOLO_Kmeans:
             infos = line.split(" ")
             length = len(infos)
             for i in range(1, length):
+                class_id = infos[i].split(",")[4]
+                if class_id != "2":
+                    continue
                 width = int(infos[i].split(",")[2]) - \
                     int(infos[i].split(",")[0])
                 height = int(infos[i].split(",")[3]) - \
@@ -90,12 +96,29 @@ class YOLO_Kmeans:
         result = result[np.lexsort(result.T[0, None])]
         self.result2txt(result)
         print("K anchors:\n {}".format(result))
-        print("Accuracy: {:.2f}%".format(
-            self.avg_iou(all_boxes, result) * 100))
+        acc = self.avg_iou(all_boxes, result) * 100
+        print("Accuracy: {:.2f}%".format(acc))
+        self.anchors_list.append(result)
+        self.accuracy_list.append(acc)
 
 
 if __name__ == "__main__":
     cluster_number = 9
-    filename = "2012_train.txt"
+    filename = "20190624/rotated_train.txt"
     kmeans = YOLO_Kmeans(cluster_number, filename)
-    kmeans.txt2clusters()
+    for i in range(100):
+        kmeans.txt2clusters()
+
+    list1 = kmeans.anchors_list
+    list2 = kmeans.accuracy_list
+    index = list2.index(max(list2))
+    print("-----------------------------------")
+    print(list1[index])
+    print("-----------------------------------")
+
+    print(list2[index])
+    for aa in list1[index]:
+        print("{},{},  ".format(aa[0], aa[1]))
+    print("-----------------------------------")
+
+

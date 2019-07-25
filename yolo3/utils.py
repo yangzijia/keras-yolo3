@@ -4,6 +4,7 @@ from functools import reduce
 
 from PIL import Image
 import numpy as np
+import cv2
 from matplotlib.colors import rgb_to_hsv, hsv_to_rgb
 
 def compose(*funcs):
@@ -34,7 +35,17 @@ def rand(a=0, b=1):
     return np.random.rand()*(b-a) + a
 
 def get_random_data(annotation_line, input_shape, random=True, max_boxes=20, jitter=.3, hue=.1, sat=1.5, val=1.5, proc_img=True):
-    '''random preprocessing for real-time data augmentation'''
+    '''random preprocessing for real-time data augmentation
+        input_shape: 网络输入的宽高
+        random: True为打开随机多尺度训练，
+                提示：当打开随机多尺度训练时，前面设置的网络输入尺寸width和height其实就不起作用了，width
+                             会在320到608之间随机取值，且width=height，没10轮随机改变一次，一般建议可以根据自己需要修改
+                             随机尺度训练的范围，这样可以增大batch
+        max_boxes: 每张图片最多可标记的box的数量
+        jitter: 
+        hue: 数据增强参数，通过调整色调来生成更多训练样本
+        sat: 数据增强参数，通过调整饱和度来生成更多训练样本
+    '''
     line = annotation_line.split()
     image = Image.open(line[0])
     iw, ih = image.size
@@ -76,31 +87,47 @@ def get_random_data(annotation_line, input_shape, random=True, max_boxes=20, jit
         nw = int(scale*w)
         nh = int(nw/new_ar)
     image = image.resize((nw,nh), Image.BICUBIC)
+    # imgs = np.asarray(image)
+    # cv2.imwrite("temp_image/resize_image.jpg", imgs)
 
     # place image
+    # 平移变换
     dx = int(rand(0, w-nw))
     dy = int(rand(0, h-nh))
     new_image = Image.new('RGB', (w,h), (128,128,128))
     new_image.paste(image, (dx, dy))
     image = new_image
+    # imgs = np.asarray(image)
+    # cv2.imwrite("temp_image/place_image.jpg", imgs)
 
     # flip image or not
+    # 翻转图片
     flip = rand()<.5
     if flip: image = image.transpose(Image.FLIP_LEFT_RIGHT)
+    
+    # imgs = np.asarray(image)
+    # cv2.imwrite("temp_image/flip_image.jpg", imgs)
 
     # distort image
+    # HSV 抖动
     hue = rand(-hue, hue)
     sat = rand(1, sat) if rand()<.5 else 1/rand(1, sat)
     val = rand(1, val) if rand()<.5 else 1/rand(1, val)
+    # 归一化处理
+    # 内部函数，通过公式转化。具体函数不介绍。
     x = rgb_to_hsv(np.array(image)/255.)
     x[..., 0] += hue
     x[..., 0][x[..., 0]>1] -= 1
     x[..., 0][x[..., 0]<0] += 1
     x[..., 1] *= sat
     x[..., 2] *= val
+    # 避免S/V CHANNEL越界
     x[x>1] = 1
     x[x<0] = 0
     image_data = hsv_to_rgb(x) # numpy array, 0 to 1
+
+    # imgs = np.asarray(image)
+    # cv2.imwrite("temp_image/distort_image.jpg", imgs)
 
     # correct boxes
     box_data = np.zeros((max_boxes,5))

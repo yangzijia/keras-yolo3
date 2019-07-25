@@ -2,11 +2,12 @@
 """
 Class definition of YOLO_v3 style detection model on image and video
 """
-
+from tracker import Tracker
+import copy
 import colorsys
 import os
 from timeit import default_timer as timer
-
+import cv2
 import numpy as np
 from keras import backend as K
 from keras.models import load_model
@@ -21,9 +22,8 @@ from draw import SelectArea
 
 class YOLO(object):
     _defaults = {
-        # "model_path": 'model_data/helmet_person_safety-belt_100epoch.h5',
-        "model_path": 'model_data/20190724_yolo_weights.h5',
-        "anchors_path": 'model_data/20190724_yolo_anchors.txt',
+        "model_path": 'model_data/20190625_4class_weights.h5',
+        "anchors_path": 'model_data/yolo_anchors.txt',
         "classes_path": 'model_data/voc_classes.txt',
         "score" : 0.3,
         "iou" : 0.45,
@@ -103,7 +103,7 @@ class YOLO(object):
 
     def detect_image(self, image):
         start = timer()
-
+        centers=[]
         if self.model_image_size != (None, None):
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
             assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
@@ -114,7 +114,7 @@ class YOLO(object):
             boxed_image = letterbox_image(image, new_image_size)
         image_data = np.array(boxed_image, dtype='float32')
 
-        print(image_data.shape)
+        #print(image_data.shape)
         image_data /= 255.
         image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
 
@@ -126,57 +126,62 @@ class YOLO(object):
                 K.learning_phase(): 0
             })
 
-        print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
+        #print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
 
         font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
                     size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300
-
+        number = 0
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
-            box = out_boxes[i]
-            score = out_scores[i]
+            if predicted_class == "cellphone":
+                box = out_boxes[i]
+                score = out_scores[i]
+                number=len(out_boxes)
+                label = '{} {:.2f}'.format(predicted_class, score)
+                draw = ImageDraw.Draw(image)
+                label_size = draw.textsize(label, font)
+                top, left, bottom, right = box
+                center=(int ((left+right)//2),int((top+bottom)//2))
+                b=np.array([[(left+right)//2],[(top+bottom)//2]])
 
-            label = '{} {:.2f}'.format(predicted_class, score)
-            draw = ImageDraw.Draw(image)
-            label_size = draw.textsize(label, font)
+                centers.append(b)
+                top = max(0, np.floor(top + 0.5).astype('int32'))
+                left = max(0, np.floor(left + 0.5).astype('int32'))
+                bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
+                right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
+                #print(label, (left, top), (right, bottom))
 
-            top, left, bottom, right = box
-            top = max(0, np.floor(top + 0.5).astype('int32'))
-            left = max(0, np.floor(left + 0.5).astype('int32'))
-            bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
-            right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-            print(label, (left, top), (right, bottom))
-
-            if top - label_size[1] >= 0:
-                text_origin = np.array([left, top - label_size[1]])
-            else:
-                text_origin = np.array([left, top + 1])
+                if top - label_size[1] >= 0:
+                    text_origin = np.array([left, top - label_size[1]])
+                else:
+                    text_origin = np.array([left, top + 1])
 
             # My kingdom for a good redistributable image drawing library.
-            for i in range(thickness):
+                for i in range(thickness):
+                    draw.rectangle(
+                        [left + i, top + i, right - i, bottom - i],
+                        outline=self.colors[c])
                 draw.rectangle(
-                    [left + i, top + i, right - i, bottom - i],
-                    outline=self.colors[c])
-            draw.rectangle(
-                [tuple(text_origin), tuple(text_origin + label_size)],
-                fill=self.colors[c])
-            draw.text(text_origin, label, fill=(0, 0, 0), font=font)
-            del draw
+                    [tuple(text_origin), tuple(text_origin + label_size)],
+                    fill=self.colors[c])
+                #draw.rectangle(
+                    #[tuple(text_origin), tuple(text_origin + label_size)],
+                    #fill=self.colors[c])
+                draw.text(text_origin, label, fill=(0, 0, 0), font=font)
+
+                del draw
 
         end = timer()
-        print(end - start)
-        return image
+        #print(end - start)
+        return image,centers,number
 
     def close_session(self):
         self.sess.close()
 
 def detect_video(yolo, video_path, output_path=""):
-    import cv2
-    # video_path = "rtsp://admin:admin123@192.168.1.65:554//Streaming/Channels/101"
-    # video_path = "test_416.avi"
-    video_path = 0
-    vid = cv2.VideoCapture(video_path)
+
+    vid = cv2.VideoCapture(1)
     if not vid.isOpened():
         raise IOError("Couldn't open webcam or video")
     video_FourCC    = int(vid.get(cv2.CAP_PROP_FOURCC))
@@ -185,58 +190,95 @@ def detect_video(yolo, video_path, output_path=""):
                         int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     isOutput = True if output_path != "" else False
     if isOutput:
-        print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
+        #print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
         out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
     accum_time = 0
     curr_fps = 0
     fps = "FPS: ??"
     prev_time = timer()
+    tracker = Tracker(160, 1, 9, 100)
+    # Variables initialization
+    skip_frame_count = 0
+    track_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
+                    (0, 255, 255), (255, 0, 255), (255, 127, 255),
+                    (127, 0, 255), (127, 0, 127)]
+    pause = False
     select_area = SelectArea()
     area_list = []
 
     while True:
         return_value, matrix = vid.read()
-        if return_value:
-            # 选择区域
-            if len(area_list) == 0:
-                select_area.run(matrix)
-                if len(select_area.area_list) <= 0:
-                    if select_area.select_times < 5:
-                        continue
-                    else:
-                        exit(0)
-                    # end if
-                # end if
-                area_list = select_area.area_list
-                temp_height = select_area.area_list[0]["height"]
-                temp_width = select_area.area_list[0]["width"]
-               
-            select_area.clear()
 
-            x1, y1, x2, y2 = area_list[0]["box"]
-            frame = matrix[y1:y2, x1:x2]
+        # # 选择区域
+        # if len(area_list) == 0:
+        #     select_area.run(matrix)
+        #     if len(select_area.area_list) <= 0:
+        #         if select_area.select_times < 5:
+        #             continue
+        #         else:
+        #             exit(0)
+        #         # end if
+        #     # end if
+        #     area_list = select_area.area_list
+        #     temp_height = select_area.area_list[0]["height"]
+        #     temp_width = select_area.area_list[0]["width"]
+        #     # # 字体重新初始化
+        #     # draw.set_font(temp_height//9, temp_height//27, (temp_width//20, temp_height//20), temp_height)
+        #     # # 输出视频put流重新初始化
+        #     # camera.width = temp_width
+        #     # camera.height = temp_height
+        # select_area.clear()
 
-            # frame.set(3, 1920)
-            # frame.set(4,1080)
-            image = Image.fromarray(frame)
-            image = yolo.detect_image(image)
-            result = np.asarray(image)
-            curr_time = timer()
-            exec_time = curr_time - prev_time
-            prev_time = curr_time
-            accum_time = accum_time + exec_time
-            curr_fps = curr_fps + 1
-            if accum_time > 1:
-                accum_time = accum_time - 1
-                fps = "FPS: " + str(curr_fps)
-                curr_fps = 0
-            cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=0.50, color=(255, 0, 0), thickness=2)
-            cv2.namedWindow("result", cv2.WINDOW_NORMAL)
-            cv2.imshow("result", result)
-            if isOutput:
-                out.write(result)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+        # x1, y1, x2, y2 = area_list[0]["box"]
+        # frame = matrix[y1:y2, x1:x2]
+        frame = matrix
+
+        print(frame.shape)
+        image = Image.fromarray(frame)
+        image,centers,number = yolo.detect_image(image)
+        print(image.size)
+        result = np.asarray(image)
+        curr_time = timer()
+        exec_time = curr_time - prev_time
+        prev_time = curr_time
+        accum_time = accum_time + exec_time
+        curr_fps = curr_fps + 1
+        if accum_time > 1:
+            accum_time = accum_time - 1
+            fps = "FPS: " + str(curr_fps)
+            curr_fps = 0
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        #cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,fontScale=0.50, color=(255, 0, 0), thickness=2)
+        # cv2.putText(result, str(number), (20,  40), font, 1, (0, 0, 255), 5)
+
+        # Track object using Kalman Filter
+        tracker.Update(centers)
+
+        # For identified object tracks draw tracking line
+        # Use various colors to indicate different track_id
+        for i in range(len(tracker.tracks)):
+            if (len(tracker.tracks[i].trace) > 1):
+                for j in range(len(tracker.tracks[i].trace) - 1):
+                    # Draw trace line
+                    x1 = tracker.tracks[i].trace[j][0][0]
+                    y1 = tracker.tracks[i].trace[j][1][0]
+                    x2 = tracker.tracks[i].trace[j + 1][0][0]
+                    y2 = tracker.tracks[i].trace[j + 1][1][0]
+
+                    clr = tracker.tracks[i].track_id % 9
+                    cv2.line(result, (int(x1), int(y1)), (int(x2), int(y2)),
+                                track_colors[clr], 4)
+                    #x3 = tracker.tracks[i].track_id
+                    #cv2.putText(result,str(tracker.tracks[j].track_id),(int(x1),int(y1)),font,track_colors[j],3)
+                    #cv2.circle(result,(int(x1),int(y1)),3,track_colors[j],3)
+        # Display the resulting tracking frame
+        cv2.imshow('Tracking', result)
+            ###################################################
+        cv2.namedWindow("result", cv2.WINDOW_NORMAL)
+        cv2.imshow("result", result)
+        if isOutput:
+            out.write(result)
+        if cv2.waitKey(100) & 0xFF == ord('q'):
+            break
     yolo.close_session()
 

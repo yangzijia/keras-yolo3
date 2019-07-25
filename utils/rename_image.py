@@ -2,7 +2,7 @@
   
 import os
 
-path = 'E:\\engyne_work\\safety_belt\\picture\\new_image\\'
+path = 'C:\\Users\\zjyang\\Desktop\\营业厅标注\\zk\\'
 
 count = 1
 for file in os.listdir(path):

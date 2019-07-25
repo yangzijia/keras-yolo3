@@ -16,9 +16,9 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 def _main():
-    annotation_path = 'helmet_safe_unsafe/voc_train.txt'
-    log_dir = 'logs/20190614/'
-    classes_path = 'wave/test/voc_classes.txt'
+    annotation_path = '20190624/voc_train.txt'
+    log_dir = 'logs/20190716/'
+    classes_path = 'model_data/voc_classes.txt'
     anchors_path = 'model_data/yolo_anchors.txt'
     class_names = get_classes(classes_path)
     num_classes = len(class_names)
@@ -60,11 +60,12 @@ def _main():
 
         batch_size = 32
         print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, batch_size))
-        history = model.fit_generator(data_generator_wrapper(lines[:num_train], batch_size, input_shape, anchors, num_classes),
+        history = model.fit_generator(
+                data_generator_wrapper(lines[:num_train], batch_size, input_shape, anchors, num_classes),
                 steps_per_epoch=max(1, num_train//batch_size),
                 validation_data=data_generator_wrapper(lines[num_train:], batch_size, input_shape, anchors, num_classes),
                 validation_steps=max(1, num_val//batch_size),
-                epochs=50,
+                epochs=1,
                 initial_epoch=0,
                 callbacks=[logging, checkpoint])
         model.save_weights(log_dir + 'trained_weights_stage_1.h5')
@@ -82,14 +83,15 @@ def _main():
         model.compile(optimizer=Adam(lr=1e-4), loss={'yolo_loss': lambda y_true, y_pred: y_pred}) # recompile to apply the change
         print('Unfreeze all of the layers.')
 
-        batch_size = 8 # note that more GPU memory is required after unfreezing the body
+        batch_size = 6 # note that more GPU memory is required after unfreezing the body
         print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, batch_size))
-        history = model.fit_generator(data_generator_wrapper(lines[:num_train], batch_size, input_shape, anchors, num_classes),
+        history = model.fit_generator(
+            data_generator_wrapper(lines[:num_train], batch_size, input_shape, anchors, num_classes),
             steps_per_epoch=max(1, num_train//batch_size),
             validation_data=data_generator_wrapper(lines[num_train:], batch_size, input_shape, anchors, num_classes),
             validation_steps=max(1, num_val//batch_size),
-            epochs=100,
-            initial_epoch=50,
+            epochs=2,
+            initial_epoch=1,
             # callbacks=[logging, checkpoint, reduce_lr, early_stopping])
             callbacks=[logging, checkpoint, reduce_lr])
         model.save_weights(log_dir + 'trained_weights_final.h5')
